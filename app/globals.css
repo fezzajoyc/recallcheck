@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+/* 站点皮肤:警示红/纸白(召回安全主题,站群第十皮肤) */
+:root {
+  --background: #fcfcfb;
+  --foreground: #21242b;
+  --brand: #b03a2e;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-ink: var(--foreground);
+  --color-brand: var(--brand);
+  --font-sans: ui-sans-serif, -apple-system, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+body { background: var(--background); color: var(--foreground); font-family: var(--font-sans); }
