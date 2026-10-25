@@ -1,8 +1,8 @@
 /** 召回数据访问层。分片在 data/rec/(sync 写入),generated.ts 静态打包。
  *  纪律:每条忠实转写官方字段,不做任何解读;页面全程链接官方源。 */
 
-import { SHARDS } from '@/data/generated'
-import rawIndex from '@/data/rec/index.json'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 export type RecallSrc = 'fda-food' | 'fda-drug' | 'fda-device' | 'cpsc'
 
@@ -40,31 +40,47 @@ interface IndexShape {
   brands: Array<{ slug: string; count: number }>
 }
 
-export const INDEX = rawIndex as unknown as IndexShape
-export const ALL: Recall[] = SHARDS.flatMap((sh) => sh.rows as unknown as Recall[])
+// 运行时 fs 加载 + 进程级缓存(避免 27MB JSON 打进每页 JS 包 —— Vercel 构建每页 >60s 的根因)
+interface CacheShape { index: IndexShape; all: Recall[] }
+const g = globalThis as unknown as { __recallCache?: CacheShape }
 
-const BY_ID = new Map<string, Recall>(ALL.map((r) => [r.id, r]))
-const sorted = [...ALL].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+function cache(): CacheShape {
+  if (!g.__recallCache) {
+    const dir = join(process.cwd(), 'data', 'rec')
+    const index = JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8')) as IndexShape
+    const all: Recall[] = []
+    for (const f of Object.keys(index.sources)) {
+      const rows = JSON.parse(readFileSync(join(dir, `${f}.json`), 'utf8')) as Recall[]
+      all.push(...rows)
+    }
+    all.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+    g.__recallCache = { index, all }
+  }
+  return g.__recallCache
+}
 
-export function indexInfo() {
-  return INDEX
+const sortedAll = [...cache().all].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+g.__recallCache = { index: cache().index, all: sortedAll }
+
+export function indexInfo(): IndexShape {
+  return cache().index
 }
 
 export function allSorted(): Recall[] {
-  return sorted
+  return cache().all
 }
 
 export function recallById(id: string): Recall | null {
-  return BY_ID.get(id) ?? null
+  return cache().all.find((r) => r.id === id) ?? null
 }
 
 export function latest(n: number): Recall[] {
-  return sorted.slice(0, n)
+  return cache().all.slice(0, n)
 }
 
 export function years(): number[] {
   const set = new Set<number>()
-  for (const r of sorted) {
+  for (const r of cache().all) {
     const y = Number(r.date.slice(0, 4))
     if (y) set.add(y)
   }
@@ -72,7 +88,7 @@ export function years(): number[] {
 }
 
 export function byYear(year: number): Recall[] {
-  return sorted.filter((r) => r.date.startsWith(String(year)))
+  return cache().all.filter((r) => r.date.startsWith(String(year)))
 }
 
 export const TYPES: Array<{ key: string; label: string; blurb: string }> = [
@@ -88,11 +104,11 @@ export function typeKey(src: RecallSrc | string): string {
 }
 
 export function byType(type: string): Recall[] {
-  return sorted.filter((r) => typeKey(r.src) === type)
+  return cache().all.filter((r) => typeKey(r.src) === type)
 }
 
 export function brandRecalls(brandSlug: string): Recall[] {
-  return sorted.filter((r) => brandSlugOf(r) === brandSlug)
+  return cache().all.filter((r) => brandSlugOf(r) === brandSlug)
 }
 
 export function brandSlugOf(r: Recall): string {
@@ -111,5 +127,5 @@ export function slugify(text: string, max = 60): string {
 }
 
 export function topBrands(limit: number): Array<{ slug: string; count: number }> {
-  return INDEX.brands.slice(0, limit)
+  return cache().index.brands.slice(0, limit)
 }
